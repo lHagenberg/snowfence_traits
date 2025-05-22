@@ -1,0 +1,633 @@
+---
+title: "Priority effects can be explained by competitive traits"
+author: "Tamara"
+date: '2023-05-25'
+output: html_document
+---
+
+```{r packages, message=FALSE, warning=FALSE, include=FALSE}
+# Set working directory to where files are saved
+setwd("~/PhD/Indoor experiments/R_project/data_for_publishing")
+
+library(ggplot2)
+library(dplyr)
+library(patchwork)
+library(vegan)
+library(reshape2)
+library(multcompView)
+library(lme4)
+library(MuMIn)
+library(xtable)
+library(lmerTest)
+library(segmented)
+
+st.error <- function(x) sd(x) / sqrt(length(x))
+theme_set(theme_bw())
+```
+
+```{r PCA loadings, echo=FALSE, message=TRUE, warning=FALSE}
+## Read trait data ##
+
+traits<-read.csv2("traits.csv", check.names = F,row.names = 1,dec = ".")%>%
+  rename(Plant.height=Plant_height_standing)
+
+## Select and scale traits that will be used in PCA ##
+
+df1 <- traits %>% dplyr::select(-func.group) %>% mutate_all(~(scale(.) %>% as.vector))
+
+## Run and plot PCA and extract loadings ##
+
+df1.pca <- rda(df1)
+summary(df1.pca)
+PCAvalues<-as.data.frame(df1.pca$CA$u[,1:2])
+PCAvalues$focal<-rownames(PCAvalues)
+traits_pca<-as.data.frame(df1.pca$CA$v)
+traits_pca$trait<-rownames(traits_pca)
+
+## Plot PCA ##
+
+pca<-ggplot() +
+    geom_vline(xintercept = 0, linetype = "dotted") +
+  geom_hline(yintercept = 0, linetype = "dotted") +
+  geom_label(data = PCAvalues, aes(PC1, PC2, label = focal),size=3, label.size = NA, fill = NA, col="azure4") +
+  geom_segment(data = traits_pca, aes(x = 0, y = 0, xend = 0.9 * PC1, yend = 0.9 * PC2), arrow = arrow(type = "closed", length = unit(0.1, "inches")),col="red")+
+  geom_point(data=PCAvalues,aes(PC1,PC2),alpha=.5)+
+  geom_label(data = traits_pca, aes(PC1, PC2, label = trait), col = "red", label.size = NA, fill = NA) +
+ # theme_minimal() +
+  theme(panel.grid = element_blank())#+xlim(-.45,.55)#+ylim(-.75,.75)
+pca
+
+#svg(filename="pca.svg", 
+#    width=5, 
+#    height=5, 
+#    pointsize=12,bg = "transparent")
+#pca
+#dev.off()
+
+```
+
+```{r calculating RII simultaneous, message=TRUE, warning=FALSE, include=FALSE}
+## read data control alone ##
+alone<-read.csv2("alone.csv",dec = ".")[c(1,8,6,7)]
+
+## read data simultaneous arrival ##
+sim<-read.csv2("simultaneous_arrival.csv",dec = ".")
+
+## aggregate alone values ##
+alone<-aggregate(.~focal,alone,FUN = mean)
+
+## merge alone data with simultaneous data ##
+SIM<-merge(alone,sim)
+
+## calculating RIIsim ##
+SIM$RIIsim_total<-(SIM$biomass.total.CT-SIM$biomass.total.CA)/(SIM$biomass.total.CA+SIM$biomass.total.CT)
+SIM$RIIsim_above<-(SIM$biomass.above.CT-SIM$biomass.above.CA)/(SIM$biomass.above.CA+SIM$biomass.above.CT)
+SIM$RIIsim_below<-(SIM$biomass.below.CT-SIM$biomass.below.CA)/(SIM$biomass.below.CA+SIM$biomass.below.CT)
+
+## Adding PCA values for focal and neighbouring species
+colnames(PCAvalues)<-c("PC1.focal","PC2.focal","focal")
+SIM<-merge(SIM,PCAvalues)
+colnames(PCAvalues)<-c("PC1.neighbour","PC2.neighbour","neighbour")
+SIM<-merge(SIM,PCAvalues)
+
+## Calculating PC1 and PC2 differences between focal and neighbouring species
+SIM$PC1.diff<-SIM$PC1.focal-SIM$PC1.neighbour
+SIM$PC2.diff<-SIM$PC2.focal-SIM$PC2.neighbour
+
+## Create an unique code for each pot ##
+SIM$trmt.pot.code <- apply(SIM[,c(1,2)], 1, function(row) paste(sort(row), collapse = " - "))
+
+```
+
+```{r calculating sequential vs simultaneous, message=TRUE, warning=FALSE, include=FALSE}
+## read data second arrival ##
+
+seq<-read.csv2("second_arrival.csv",dec = ".")[,-c(1,4)]
+
+## merge seq and sim data##
+SEQ<-merge(seq,sim,all = T) # Due to some deaths there are NA's introduced here
+
+## calculate priority effects (RIIseq) ##
+SEQ$RIIseq_above<-(SEQ$biomass.above.PE-SEQ$biomass.above.CT)/(SEQ$biomass.above.CT+SEQ$biomass.above.PE)
+SEQ$RIIseq_below<-(SEQ$biomass.below.PE-SEQ$biomass.below.CT)/(SEQ$biomass.below.CT+SEQ$biomass.below.PE)
+SEQ$RIIseq_total<-(SEQ$biomass.total.PE-SEQ$biomass.total.CT)/(SEQ$biomass.total.CT+SEQ$biomass.total.PE)
+
+## Adding PCA values
+colnames(PCAvalues)<-c("PC1.focal","PC2.focal","focal")
+SEQ<-merge(SEQ,PCAvalues)
+colnames(PCAvalues)<-c("PC1.neighbour","PC2.neighbour","neighbour")
+SEQ<-merge(SEQ,PCAvalues)
+
+## Calculating PC1 and PC2 differences between focal and neighbouring species
+SEQ$PC1.diff<-SEQ$PC1.focal-SEQ$PC1.neighbour
+SEQ$PC2.diff<-SEQ$PC2.focal-SEQ$PC2.neighbour
+
+## Create an unique code for each pot ##
+SEQ$ctrl.pot.code <- apply(SEQ[,c(1,2)], 1, function(row) paste(sort(row), collapse = " - "))
+
+```
+
+####### "raw" data figure #########
+
+```{r raw, echo=FALSE}
+means<-c(mean(SIM$biomass.total.CA),mean(SIM$biomass.total.CT),mean(SEQ$biomass.total.PE, na.rm = T))
+sds<-c(st.error(SIM$biomass.total.CA),st.error(SIM$biomass.total.CT),st.error(na.omit(SEQ$biomass.total.PE)))
+
+raw<-as.data.frame(cbind(means,sds))
+raw$trmt<-c("Alone","Simultaneous","Sequential (arriving second)")
+raw$trmt <- factor(raw$trmt, levels = c("Alone", "Simultaneous", "Sequential (arriving second)"))
+raw
+
+ggplot(raw, aes(y=means,x=trmt)) + 
+  geom_bar(position=position_dodge(), stat="identity", 
+           colour='black') + geom_errorbar(aes(ymin=means-sds, ymax=means+sds), width=.2)+
+  xlab("")+ylab("Biomass (g)")+theme(panel.grid = element_blank())
+```
+
+######## Response vs. effect ###########
+
+```{r response vs effect, echo=FALSE}
+## calculate average competitive responses of species when arriving simultaneous ##
+sim_response<- setNames(do.call(data.frame, aggregate(RIIsim_total ~ focal, SIM, function(x) c(mean = mean(x), sd = st.error (x)))),c('species','response','response.sd'))
+
+## calculate average competitive effects of species when arriving simultaneous ##
+sim_effect<- setNames(do.call(data.frame, aggregate(RIIsim_total ~ neighbour, SIM, function(x) c(mean = mean(x), sd = st.error(x)))),c('species','effect','effect.sd'))
+
+# Merging competitive effects and responses ##
+Response_effect_sim<-merge(sim_response,sim_effect)
+Response_effect_sim$trmt<-"sim"
+
+## Calculate average competitive responses of species when arriving second ##
+seq_response<- setNames(do.call(data.frame, aggregate(RIIseq_total ~ focal, SEQ, function(x) c(mean = mean(x), sd = st.error(x)))),c('species','response','response.sd'))
+
+## Calculate average competitive effects of species when arriving second ##
+seq_effect<- setNames(do.call(data.frame, aggregate(RIIseq_total ~ neighbour, SEQ, function(x) c(mean = mean(x), sd = st.error(x)))),c('species','effect','effect.sd'))
+
+## Merging competitive effects and responses ##
+Response_effect_seq<-merge(seq_response,seq_effect)
+Response_effect_seq$trmt<-"seq"
+
+## Binding sim and seq ##
+Response_effect<-rbind(Response_effect_sim,Response_effect_seq)
+func<-as.data.frame(cbind(rownames(traits),traits %>% dplyr::select(func.group) ))
+names(func)<-c("species","Func")
+Response_effect<-merge(Response_effect,func)
+
+#### Linear model simultaneous response vs effect #
+model37<-lm(effect~response,Response_effect[Response_effect$trmt=="sim",])
+summary(model37)
+predict37<-seq(min(Response_effect[Response_effect$trmt=="sim",]$response),max(Response_effect[Response_effect$trmt=="sim",]$response),length.out=30)
+Predict <- predict(model37,list(response=predict37))
+Predict.df.37<-as.data.frame(cbind(predict37,Predict))
+
+##### Linear model sequential response vs effect #
+model38a<-lm(effect~response+I(response),Response_effect[Response_effect$trmt=="seq",])
+model38b<-lm(effect~response+I(response^2),Response_effect[Response_effect$trmt=="seq",])
+anova(model38a,model38b)
+predict38<-seq(min(Response_effect[Response_effect$trmt=="seq",]$response),max(Response_effect[Response_effect$trmt=="seq",]$response),length.out=30)
+summary(model38b)
+Predict <- predict(model38b,list(response=predict38, response2=predict38^2))
+Predict.df.38<-as.data.frame(cbind(predict38,Predict))
+
+## plot response ~ effect ##
+ggplot(data=Response_effect,aes(response,effect, col=Func))+
+  geom_point(alpha=.5)+
+  scale_shape_manual(values=c(1, 16))+
+   geom_errorbar(aes(ymin=effect-effect.sd, ymax=effect+effect.sd), width=.02,
+                 position=position_dodge(0.05),alpha=.2)+  
+  geom_errorbar(aes(xmin=response-response.sd, xmax=response+response.sd), width=.02,
+                 position=position_dodge(0.05),alpha=.2)+
+   geom_smooth(data=Predict.df.38,aes(predict38,Predict),col="darkgrey")+
+  geom_smooth(data=Predict.df.37,aes(predict37,Predict),col="darkgrey")+
+   scale_color_manual(values=c("#999999", "#E69F00", "#56B4E9"))
+
+```
+
+######## t.test between RIIsim and RIIseq ###############
+
+```{r t.test difference between RIIseq and RIIsim, echo=FALSE, message=FALSE, warning=FALSE}
+ttest<-na.omit(merge(SEQ[,c(1,2,11)],SIM[,c(1,2,9)]))
+t.test(ttest$RIIseq_total,ttest$RIIsim_total, paired = T)
+
+data.frame(
+  RIIsim = c("mean" = mean(ttest$RIIsim_total), "sd" = sd(ttest$RIIsim_total)),
+  RIIseq = c("mean" = mean(ttest$RIIseq_total), "sd" = sd(ttest$RIIseq_total))
+)
+```
+
+############### Functional groups ###################
+
+```{r RIIsim response effect combined boxplot, echo=FALSE}
+## melt to make above- or below-ground a variable ##
+RIIsim<-melt(SIM, measure.vars  = c('RIIsim_total',"RIIsim_above","RIIsim_below"),id.vars  = c('focal', 'neighbour'))
+
+## Add functional group of both focal and neighbor##
+response<-as.data.frame(cbind(rownames(traits),traits %>% dplyr::select(func.group)))
+names(response)<-c("focal","Focal")
+effect<-response
+names(effect)<-c("neighbour","Neighbour")
+RIIsim<-merge(RIIsim,response)
+RIIsim<-merge(RIIsim,effect)
+
+## Remove total biomass data ##
+RIIsim<-RIIsim[RIIsim$variable!="RIIsim_total",]
+
+## Aggregate on functional groups ##
+RIIsim_response<- do.call(data.frame, aggregate(value ~ Focal +Neighbour+variable, RIIsim, function(x) c(mean = mean(x), se = st.error(x)))) 
+
+## Run ANOVA and Tukey-HSD ##
+aov2a<-aov(value~variable*Focal*Neighbour,RIIsim)
+summary(aov2a)
+TukeyHSD(aov2a)
+
+## Save boxplots ##
+RIIsim_response$Location<-ifelse(RIIsim_response$variable=="RIIsim_above", "Above","Below")
+
+x<-ggplot(RIIsim_response,aes(Location ,value.mean,fill=Neighbour))+
+   scale_fill_manual(values=c("#999999", "#E69F00", "#56B4E9"))+
+  geom_bar(stat = "identity",position = "dodge")+
+  facet_wrap(~Focal, strip.position = "bottom")+
+    geom_errorbar(aes(ymin=value.mean-value.se, ymax=value.mean+value.se), width=0.4,position=position_dodge(.9))+
+  ylab(bquote(RII[sim]))+xlab("")+
+  theme(legend.title = element_blank(),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank())
+
+
+```
+
+```{r RIIseq response effect combined boxplot, echo=FALSE}
+## melt to make above- or below-ground a variable ##
+RIIseq<-melt(SEQ, measure.vars  = c('RIIseq_total',"RIIseq_above","RIIseq_below"),id.vars  = c('focal', 'neighbour'))
+
+## Add functional group of both focal and neighbor##
+response<-as.data.frame(cbind(rownames(traits), traits %>% dplyr::select(func.group) ))
+names(response)<-c("focal","Focal")
+effect<-response
+names(effect)<-c("neighbour","Neighbour")
+RIIseq<-merge(RIIseq,response)
+RIIseq<-merge(RIIseq,effect)
+
+## Remove total biomass data ##
+RIIseq<-RIIseq[RIIseq$variable!="RIIseq_total",]
+
+## Aggregate on functional groups ##
+RIIseq_response<- do.call(data.frame, aggregate(value ~ Focal +Neighbour+variable, RIIseq, function(x) c(mean = mean(x), se = st.error(x)))) 
+RIIseq_response$Location<-ifelse(RIIseq_response$variable=="RIIseq_above", "Above","Below")
+
+## Run ANOVA and Tukey-HSD ##
+aov2b<-aov(value~variable*Focal*Neighbour,RIIseq)
+summary(aov2b)
+TukeyHSD(aov2b)
+
+## Plot boxplots ##
+y<-ggplot(RIIseq_response,aes(Location ,value.mean,fill=Neighbour))+
+   scale_fill_manual(values=c("#999999", "#E69F00", "#56B4E9"))+
+  geom_bar(stat = "identity",position = "dodge")+
+  facet_wrap(~Focal, strip.position = "bottom")+
+    geom_errorbar(aes(ymin=value.mean-value.se, ymax=value.mean+value.se), width=0.4,position=position_dodge(.9))+
+  ylab(bquote(RII[seq]))+xlab("")+
+  theme(legend.title = element_blank(),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank())
+
+x+y+plot_layout(ncol = 1)
+```
+
+############## Linear mixed effects models ###########
+
+```{r SIM pc1 lmer, echo=FALSE, warning=FALSE}
+## Create dataset for LMER ##
+SIM_lmer_df_PC1<- melt(SIM[,c(1,2,10,11,12,13,18,14,15,16,17)], id = c("neighbour","focal","PC1.focal","PC2.focal","trmt.pot.code","PC1.neighbour","PC2.neighbour","PC1.diff","PC2.diff")) 
+
+## Model for RIIsim PC1
+lmer_SIM_PC1<-lmer(value~PC1.focal+ PC1.neighbour+variable+
+                                   PC1.focal*variable+
+                                   PC1.neighbour*variable+
+                                  PC1.focal*PC1.neighbour+
+                                   (1 | focal) + (1 | neighbour) +(1 | trmt.pot.code),data = SIM_lmer_df_PC1)
+
+## Model outputs 
+print("output lmer_SIM_PC1")
+anova(lmer_SIM_PC1)
+r.squaredGLMM(lmer_SIM_PC1)
+#xtable(anova(lmer_SIM_PC1))
+
+## Model for RIIsim PC1 difference
+lmer_SIM_diff1_PC1<-lmer(value~poly(PC1.diff,1)*variable + (1 | focal) + (1 | neighbour) +(1 | trmt.pot.code),data = SIM_lmer_df_PC1)
+
+## Model outputs 
+print("output lmer_SIM_diff1_PC1")
+anova(lmer_SIM_diff1_PC1)
+r.squaredGLMM(lmer_SIM_diff1_PC1)
+#xtable(anova(lmer_SIM_diff1_PC1))
+
+## Save plots ##
+l<-ggplot(data=SIM_lmer_df_PC1,aes(PC1.focal,value,col=variable,fill=variable))+
+  geom_point(alpha=.2)+
+     scale_colour_manual(values=c("#E69F00", "#56B4E9"))+
+     scale_fill_manual(values=c("#E69F00", "#56B4E9"))+
+      stat_smooth(method = "lm")+
+  theme(legend.position="NONE")+
+      theme(
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor.x = element_blank(),
+        panel.grid.major.y = element_blank(),
+        panel.grid.minor.y = element_blank()
+      )+ xlab("")+ylab("RIIsim")+ggtitle("Traits of focal")
+
+m<-ggplot(SIM_lmer_df_PC1,aes(PC1.neighbour,value,col=variable,fill=variable))+
+  geom_point(alpha=.2)+
+      stat_smooth(method = "lm")+
+                    theme(legend.position="NONE")+
+     scale_colour_manual(values=c("#E69F00", "#56B4E9"))+
+     scale_fill_manual(values=c("#E69F00", "#56B4E9"))+
+      theme(
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor.x = element_blank(),
+        panel.grid.major.y = element_blank(),
+        panel.grid.minor.y = element_blank()
+      )+ xlab("")+ylab("")+ggtitle("Traits of neighbor")
+
+o<-ggplot(SIM_lmer_df_PC1,aes(PC1.diff,value,col=variable,fill=variable))+
+  geom_point(alpha=.2)+
+ geom_smooth(method = "lm")+
+     scale_colour_manual(values=c("#E69F00", "#56B4E9"))+
+     scale_fill_manual(values=c("#E69F00", "#56B4E9"))+
+      theme(legend.position="NONE",
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor.x = element_blank(),
+        panel.grid.major.y = element_blank(),
+        panel.grid.minor.y = element_blank()
+      )+ xlab("")+ylab("")+ggtitle("Trait dissimilarity")
+
+#l+m+o
+```
+
+```{r break point analysis, echo=FALSE}
+SEQ_lmer_df_PC1<- melt(SEQ[,c("neighbour","focal","PC1.focal","PC2.focal","ctrl.pot.code","PC1.neighbour","PC2.neighbour","PC1.diff","PC2.diff","RIIseq_above","RIIseq_below")], id = c("neighbour","focal","PC1.focal","PC2.focal","ctrl.pot.code","PC1.neighbour","PC2.neighbour","PC1.diff","PC2.diff")) 
+
+df<-SEQ_lmer_df_PC1
+df<-na.omit(df)
+p <- ggplot(df, aes(x = PC1.diff, y = value)) + geom_point()
+
+
+my.lm <- lm(value~PC1.diff, data = df)
+
+my.coef <- coef(my.lm)
+
+p <- p + geom_abline(intercept = my.coef[1], 
+                     slope = my.coef[2], 
+                     aes(colour = "overall"))
+
+my.lm3 <- lm(value ~ poly(PC1.diff,2), data = df)
+
+p + geom_smooth(method = "lm",
+                formula = y ~ poly(x, degree = 2), 
+                se = FALSE, colour = "orange")
+####################
+
+davies.test(my.lm)
+
+my.seg <- segmented(my.lm, 
+                    seg.Z = ~ PC1.diff, 
+                    psi = 0)
+
+summary(my.seg)
+
+my.fitted <- fitted(my.seg)
+my.model <- data.frame(PC1.diff = df$PC1.diff, value = my.fitted)
+
+# plot the fitted model
+my.lines <- my.seg$psi[, 2]
+
+p <- p + geom_vline(xintercept = my.lines, linetype = "dashed")+
+  geom_line(data = my.model, aes(x = PC1.diff, y = value), colour = "tomato")
+p+ geom_smooth(method = "lm",
+               formula = y ~ poly(x, degree = 2), 
+               se = FALSE, colour = "orange")
+
+```
+
+```{r SEQ pc1 lmer, echo=FALSE, warning=FALSE}
+## Create dataset for LMER ##
+SEQ_lmer_df_PC1<- melt(SEQ[,c("neighbour","focal","PC1.focal","PC2.focal","ctrl.pot.code","PC1.neighbour","PC2.neighbour","PC1.diff","PC2.diff","RIIseq_above","RIIseq_below")], id = c("neighbour","focal","PC1.focal","PC2.focal","ctrl.pot.code","PC1.neighbour","PC2.neighbour","PC1.diff","PC2.diff")) 
+
+## Model for RIIseq PC1
+lmer_SEQ1_PC1<-lmer(value~PC1.focal+ PC1.neighbour+variable+
+                                   PC1.focal*variable+
+                                   PC1.neighbour*variable+
+                                  PC1.focal*PC1.neighbour+
+                                   (1 | focal) + (1 | neighbour) +(1 | ctrl.pot.code),data = SEQ_lmer_df_PC1)
+
+## Model outputs 
+print("output lmer_SEQ1_PC1")
+anova(lmer_SEQ1_PC1)
+r.squaredGLMM(lmer_SEQ1_PC1)
+xtable(anova(lmer_SEQ1_PC1))
+
+## Model for RIIsim PC1 difference with model selection to see if quadratic term is significant ##
+
+lmer_SEQ_diff1_PC1<-lmer(value~PC1.diff*variable + (1 | focal) + (1 | neighbour) +(1 | ctrl.pot.code),data = SEQ_lmer_df_PC1)
+
+lmer_SEQ_diff2_PC1<-lmer(value~poly(PC1.diff,2)*variable + (1 | focal) + (1 | neighbour) +(1 | ctrl.pot.code),data = SEQ_lmer_df_PC1)
+
+anova(lmer_SEQ_diff1_PC1,lmer_SEQ_diff2_PC1) # added clarity by poly2 significant
+
+## Model outputs 
+print("output lmer_SEQ_diff2_PC1")
+anova(lmer_SEQ_diff2_PC1)
+r.squaredGLMM(lmer_SEQ_diff2_PC1)
+#xtable(anova(lmer_SEQ_diff2_PC1))
+
+## Plotting linear models ##
+p<-ggplot(SEQ_lmer_df_PC1,aes(PC1.focal,value,col=variable,fill=variable))+
+  geom_point(alpha=.2)+
+ geom_smooth(method = "lm")+theme(legend.position="NONE")+
+     scale_colour_manual(values=c("#E69F00", "#56B4E9"))+
+     scale_fill_manual(values=c("#E69F00", "#56B4E9"))+
+      theme(
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor.x = element_blank(),
+        panel.grid.major.y = element_blank(),
+        panel.grid.minor.y = element_blank()
+      )+ xlab("PC1 focal")+ylab("RIIseq")
+
+q<-ggplot(data=SEQ_lmer_df_PC1,aes(PC1.neighbour,value,col=variable,fill=variable))+
+  geom_point(alpha=.2)+
+  theme(legend.position="NONE")+
+     scale_colour_manual(values=c("#E69F00", "#56B4E9"))+
+     scale_fill_manual(values=c("#E69F00", "#56B4E9"))+
+ geom_smooth(method = "lm")+
+      theme(
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor.x = element_blank(),
+        panel.grid.major.y = element_blank(),
+        panel.grid.minor.y = element_blank()
+      )+ xlab("PC1 neighbour")+ylab("")
+
+r<-ggplot(SEQ_lmer_df_PC1,aes(PC1.diff,value,col=variable,fill=variable))+
+  geom_point(alpha=.2) +
+      stat_smooth(method = "lm", formula =y ~ x + I(x^2))+
+     scale_colour_manual(labels = c("Above", "Below"),values=c("#E69F00", "#56B4E9"))+
+     scale_fill_manual(labels = c("Above", "Below"),values=c("#E69F00", "#56B4E9"))+
+       theme(legend.title=element_blank(),
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor.x = element_blank(),
+        panel.grid.major.y = element_blank(),
+        panel.grid.minor.y = element_blank()
+      ) + xlab("PC1 difference")+ylab("")+
+   geom_vline(xintercept = my.lines, linetype = "dashed")
+
+l+m+o+p+q+r
+
+
+```
+
+```{r export pc1 image, eval=FALSE, include=FALSE}
+svg(filename="pc1_total_LMER.svg", 
+    width=7, 
+    height=4, 
+    pointsize=5,bg = "transparent")
+l+m+o+p+q+r
+dev.off()
+```
+
+```{r SIM pc2 lmer, echo=FALSE, warning=FALSE}
+SIM_lmer_df_PC2<- melt(SIM[,c(1,2,10,11,12,13,18,14,15,16,17)], id = c("neighbour","focal","PC1.focal","PC2.focal","trmt.pot.code","PC1.neighbour","PC2.neighbour","PC1.diff","PC2.diff")) 
+
+lmer_SIM2_PC2<-lmer(value~PC2.focal+ PC2.neighbour+variable+
+                                   PC2.focal*variable+
+                                   PC2.neighbour*variable+
+                                  PC2.focal*PC2.neighbour+
+                                   (1 | focal) + (1 | neighbour) +(1 | trmt.pot.code),data = SIM_lmer_df_PC2)
+
+## Model outputs 
+print("output lmer_SIM2_PC2")
+anova(lmer_SIM2_PC2)
+r.squaredGLMM(lmer_SIM2_PC2)
+#xtable(anova(lmer_SIM2_PC2))
+
+######################################################################
+
+lmer_SIM_diff1_PC2<-lmer(value~poly(PC2.diff,1)*variable + (1 | focal) + (1 | neighbour) +(1 | trmt.pot.code),data = SIM_lmer_df_PC2)
+
+## Model outputs 
+print("output lmer_SIM_diff1_PC2")
+anova(lmer_SIM_diff1_PC2)
+r.squaredGLMM(lmer_SIM_diff1_PC2)
+#xtable(anova(lmer_SIM_diff1_PC2))
+
+l<-ggplot(data=SIM_lmer_df_PC2,aes(PC2.focal,value,col=variable,fill=variable))+
+  geom_point(alpha=.2)+
+     scale_colour_manual(values=c("#E69F00", "#56B4E9"))+
+     scale_fill_manual(values=c("#E69F00", "#56B4E9"))+
+  theme(legend.position="NONE")+
+      theme(
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor.x = element_blank(),
+        panel.grid.major.y = element_blank(),
+        panel.grid.minor.y = element_blank()
+      )+ xlab("")+ylab("RIIsim")+ggtitle("Traits of focal")
+
+m<-ggplot(SIM_lmer_df_PC2,aes(PC2.neighbour,value,col=variable,fill=variable))+
+  geom_point(alpha=.2)+
+    theme(legend.position="NONE")+
+     scale_colour_manual(values=c("#E69F00", "#56B4E9"))+
+     scale_fill_manual(values=c("#E69F00", "#56B4E9"))+
+      theme(
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor.x = element_blank(),
+        panel.grid.major.y = element_blank(),
+        panel.grid.minor.y = element_blank()
+      )+ xlab("")+ylab("")+ggtitle("Traits of neighbor")
+
+o<-ggplot(SIM_lmer_df_PC2,aes(PC2.diff,value,col=variable,fill=variable))+
+  geom_point(alpha=.2)+
+     scale_colour_manual(values=c("#E69F00", "#56B4E9"))+
+     scale_fill_manual(values=c("#E69F00", "#56B4E9"))+
+      theme(legend.position="NONE",
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor.x = element_blank(),
+        panel.grid.major.y = element_blank(),
+        panel.grid.minor.y = element_blank()
+      )+ xlab("")+ylab("")+ggtitle("Trait dissimilarity")
+
+#l+m+o
+```
+
+```{r SEQ pc2 lmer, echo=FALSE, warning=FALSE}
+SEQ_lmer_df_PC2<- melt(SEQ[,c(1,2,9,10,12,13,18,14,15,16,17)], id = c("neighbour","focal","PC1.focal","PC2.focal","ctrl.pot.code","PC1.neighbour","PC2.neighbour","PC1.diff","PC2.diff")) 
+
+lmer_SEQ1_PC2<-lmer(value~PC2.focal+ PC2.neighbour+variable+
+                                   PC2.focal*variable+
+                                   PC2.neighbour*variable+
+                                  PC2.focal*PC2.neighbour+
+                                   (1 | focal) + (1 | neighbour) +(1 | ctrl.pot.code),data = SEQ_lmer_df_PC2)
+
+## Model outputs 
+print("output lmer_SEQ1_PC2")
+anova(lmer_SEQ1_PC2)
+r.squaredGLMM(lmer_SEQ1_PC2)
+#xtable(anova(lmer_SEQ1_PC2))
+
+#####################################
+
+lmer_SEQ_diff2_PC2<-lmer(value~PC2.diff*variable + (1 | focal) + (1 | neighbour) +(1 | ctrl.pot.code),data = SEQ_lmer_df_PC2)
+
+## Model outputs 
+print("output lmer_SEQ_diff2_PC2")
+anova(lmer_SEQ_diff2_PC2)
+r.squaredGLMM(lmer_SEQ_diff2_PC2)
+#xtable(anova(lmer_SEQ_diff2_PC2))
+
+p<-ggplot(SEQ_lmer_df_PC2,aes(PC2.focal,value,col=variable,fill=variable))+
+  geom_point(alpha=.2)+
+# geom_smooth(method = "lm")+
+  theme(legend.position="NONE")+
+     scale_colour_manual(values=c("#E69F00", "#56B4E9"))+
+     scale_fill_manual(values=c("#E69F00", "#56B4E9"))+
+      theme(
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor.x = element_blank(),
+        panel.grid.major.y = element_blank(),
+        panel.grid.minor.y = element_blank()
+      )+ xlab(" focal")+ylab("RIIseq")
+
+q<-ggplot(data=SEQ_lmer_df_PC2,aes(PC2.neighbour,value,col=variable,fill=variable))+
+  geom_point(alpha=.2)+
+  theme(legend.position="NONE")+
+     scale_colour_manual(values=c("#E69F00", "#56B4E9"))+
+     scale_fill_manual(values=c("#E69F00", "#56B4E9"))+
+      theme(
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor.x = element_blank(),
+        panel.grid.major.y = element_blank(),
+        panel.grid.minor.y = element_blank()
+      )+ xlab("PC2 neighbour")+ylab("")
+
+r<-ggplot(SEQ_lmer_df_PC2,aes(PC2.diff,value,col=variable,fill=variable))+
+  geom_point(alpha=.2) +
+     scale_colour_manual(labels = c("Above", "Below"),values=c("#E69F00", "#56B4E9"))+
+     scale_fill_manual(labels = c("Above", "Below"),values=c("#E69F00", "#56B4E9"))+
+       theme(legend.title=element_blank(),
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor.x = element_blank(),
+        panel.grid.major.y = element_blank(),
+        panel.grid.minor.y = element_blank()
+      ) + xlab("PC2 difference")+ylab("")
+
+l+m+o+p+q+r
+
+
+```
+
+```{r export pc2 image, eval=FALSE, include=FALSE}
+svg(filename="pc2_total_LMER.svg", 
+    width=7, 
+    height=4, 
+    pointsize=5,bg = "transparent")
+l+m+o+p+q+r
+dev.off()
+```
+
