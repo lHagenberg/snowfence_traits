@@ -1,0 +1,196 @@
+---
+title: "bootstrapped_community_means"
+author: "Liyenne"
+date: "2025-05-23"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Setup
+```{r}
+# data handling
+require(tidyverse)
+
+# analysis
+require(traitstrap)
+
+# visualization
+require(ggplot2)
+```
+
+# Data import
+```{r}
+# taxonomic information
+species_list <- read_csv("../2_data/1_raw_data/community_composition/sf_vp_species_list.csv") %>% 
+  mutate(across(1:5, as.factor))
+```
+
+```{r data import}
+# trait data
+trait_data_raw <- read_csv("../2_data/1_raw_data/snowfence_traits/sf_plant_trait_data_full_v1.csv") %>% 
+  mutate(habitat = case_when(habitat == 'D' ~ 'meadow',
+                           habitat == 'E' ~ 'heath',
+                           habitat == "X" ~ 'ridge')) %>% 
+  mutate(treatment = case_when(treatment == 'C' ~ 'control',
+                           treatment == 'SF' ~ 'snowfence')) %>% 
+  left_join(species_list, by = "spec") %>% # add taxonomic data
+  select(code:spec, species:group, everything())
+```
+
+```{r}
+# community composition data (long)
+community_data <- read_csv("../2_data/1_raw_data/community_composition/vp_pp_2023_l_fn.csv") %>% 
+  mutate(habitat = as.factor(ifelse( # create habitat variable based on plot code
+    grepl('D', plot), 'meadow', ifelse(
+      grepl('E', plot), 'heath', 'ridge'))
+    )) %>% 
+  mutate(treatment = as.factor(ifelse( # create treatment variable based on plot code
+    grepl('C', plot), 'control', 'snowfence'
+    ))) %>%  
+  mutate(site = as.factor(substr(plot, 2,2))) %>% # create site variable from plot code
+  mutate(cover = hits/441 * 100) %>% # convert hits to cover
+  left_join(species_list, by = "species") %>% 
+  select(plot, habitat, site, treatment, spec, species, genus:group, hits, cover)
+```
+
+```{r}
+leaf_chem <- read_csv("../2_data/1_raw_data/snowfence_traits/sf_leaf_chem.csv") %>% 
+  mutate(across(1:3, as.factor))
+```
+
+# Wrangling
+## trait data (full)
+```{r LDMC caclulation}
+trait_data <- trait_data_raw %>% 
+  mutate(LDMC = dweight / fweight) %>% 
+  select(code:leafa, LDMC); head(trait_data, 10)
+```
+
+```{r SLA caclulation}
+trait_data <- trait_data_raw %>% 
+  mutate(SLA = leafa / dweight) %>% 
+  full_join(trait_data) %>% 
+  select(code:dweight, leafa, LDMC, SLA); head(trait_data, 10)
+```
+
+```{r}
+trait_data <- trait_data %>% 
+  mutate(across(1:10, as.factor)) # convert catergorical variables to factor
+```
+
+```{r}
+# convert trait dataset to long format
+trait_data_long <- trait_data %>% 
+  pivot_longer(!code:group, names_to = "trait", values_to = "trait_value") 
+```
+
+## trait data (pooled) 
+```{r}
+trait_data_pooled <- trait_data %>%  # pool data by plot and species
+  group_by(plot, spec) %>% 
+  summarise(height = mean(height),
+            dweight = mean(dweight), 
+            fweight = mean(fweight),
+            leafa = mean(leafa), 
+            LDMC = mean(LDMC), 
+            SLA = mean(SLA))
+
+trait_data_pooled <- trait_data %>% # add taxonomic variables to pooled dataset
+  select(2:10) %>% 
+  right_join(trait_data_pooled, by = c("plot", "spec")) %>% 
+  distinct()
+```
+
+### add leaf chem comp
+```{r}
+trait_data_pooled <- trait_data_pooled %>% 
+  left_join(leaf_chem, by = c("plot", "spec")) %>% # combined data has 3 extra rows??? 
+  select(ID, everything())
+```
+
+```{r}
+# convert trait dataset to long format
+trait_data_pooled_long <- trait_data_pooled %>% 
+  pivot_longer(!ID:group, names_to = "trait", values_to = "trait_value") %>% 
+  filter(!is.na(ID))
+```
+
+
+# Bootstrapping traits
+## trait fill 
+### no chem
+```{r}
+filled_traits <- trait_fill(
+comm = community_data, traits = trait_data_long,
+scale_hierarchy = c("habitat", "site", "treatment", "plot"),
+taxon_col = c("species", "genus", "family"), value_col = "trait_value",
+trait_col = "trait", abundance_col = "hits", complete_only = TRUE, leaf_id = "code"
+)
+autoplot(filled_traits)
+```
+
+```{r}
+trait_missing(filled_trait = filled_traits, comm = community_data)
+```
+
+```{r}
+boot_traits <- trait_np_bootstrap(filled_traits = filled_traits, nrep = 10, sample_size = 100)
+```
+
+### with chem
+```{r}
+filled_traits_pooled <- trait_fill(
+comm = community_data, traits = trait_data_pooled_long,
+scale_hierarchy = c("habitat", "site", "treatment", "plot"),
+taxon_col = c("species", "genus", "family"), value_col = "trait_value",
+trait_col = "trait", abundance_col = "hits", complete_only = TRUE, leaf_id = "ID"
+)
+autoplot(filled_traits_pooled)
+```
+
+```{r}
+trait_missing(filled_trait = filled_traits_pooled, comm = community_data)
+```
+
+```{r}
+boot_traits_pooled <- trait_np_bootstrap(filled_traits = filled_traits_pooled, nrep = 10, sample_size = 100)
+```
+
+# community weighted averages
+are shifts in community averages driven by species adaptation or species composition differences?
+## no chem
+```{r}
+boot_traits %>% 
+  ggplot(aes(x = habitat, y = mean, fill = treatment)) + 
+  geom_boxplot() + 
+  facet_wrap(~ trait, scales = "free") + 
+  theme_classic() +
+  theme(panel.spacing = unit(.0, "lines"),
+        panel.border = element_rect(color = "black", fill = NA, size = 1),
+        legend.position = "bottom",
+        legend.margin = margin(t = -8),
+        strip.background = element_rect(color = "black", size = 1),
+        axis.text.x = element_text(angle = 25, hjust = 1))
+
+ggsave("../3_output/Figures/bootstrapped_traits.svg", height = 7, width = 7)
+```
+
+## with chem
+```{r}
+boot_traits_pooled %>% 
+  ggplot(aes(x = habitat, y = mean, fill = treatment)) + 
+  geom_boxplot() + 
+  facet_wrap(~ trait, scales = "free") + 
+  theme_classic() +
+  theme(panel.spacing = unit(.0, "lines"),
+        panel.border = element_rect(color = "black", fill = NA, size = 1),
+        legend.position = "bottom",
+        legend.margin = margin(t = -8),
+        strip.background = element_rect(color = "black", size = 1),
+        axis.text.x = element_text(angle = 25, hjust = 1))
+
+ggsave("../3_output/Figures/bootstrapped_traits_pooled.svg", height = 7, width = 7)
+```

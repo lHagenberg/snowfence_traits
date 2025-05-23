@@ -1,0 +1,267 @@
+---
+title: "multivariate_trait_stats"
+author: "Liyenne"
+date: "2025-05-23"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Setup
+```{r}
+# data handling
+require(tidyverse)
+
+# analysis
+require(vegan)
+
+# visualization
+require(ggplot2)
+require(ggrepel)
+require(ggordiplots)
+require(ggvegan)
+```
+
+# Data import
+```{r}
+# taxonomic information
+species_list <- read_csv("../2_data/1_raw_data/community_composition/sf_vp_species_list.csv") %>% 
+  mutate(across(1:5, as.factor))
+```
+
+```{r data import}
+# trait data
+trait_data_raw <- read_csv("../2_data/1_raw_data/snowfence_traits/sf_plant_trait_data_full_v1.csv") %>% 
+  mutate(habitat = case_when(habitat == 'D' ~ 'meadow',
+                           habitat == 'E' ~ 'heath',
+                           habitat == "X" ~ 'ridge')) %>% 
+  mutate(treatment = case_when(treatment == 'C' ~ 'control',
+                           treatment == 'SF' ~ 'snowfence')) %>% 
+  left_join(species_list, by = "spec") %>% # add taxonomic data
+  select(code:spec, species:group, everything())
+```
+
+```{r}
+# community composition data (long)
+community_data <- read_csv("../2_data/1_raw_data/community_composition/vp_pp_2023_l_fn.csv") %>% 
+  mutate(habitat = as.factor(ifelse( # create habitat variable based on plot code
+    grepl('D', plot), 'meadow', ifelse(
+      grepl('E', plot), 'heath', 'ridge'))
+    )) %>% 
+  mutate(treatment = as.factor(ifelse( # create treatment variable based on plot code
+    grepl('C', plot), 'control', 'snowfence'
+    ))) %>%  
+  mutate(site = as.factor(substr(plot, 2,2))) %>% # create site variable from plot code
+  mutate(cover = hits/441 * 100) %>% # convert hits to cover
+  left_join(species_list, by = "species") %>% 
+  select(plot, habitat, site, treatment, spec, species, genus:group, hits, cover)
+```
+
+```{r}
+leaf_chem <- read_csv("../2_data/1_raw_data/snowfence_traits/sf_leaf_chem.csv") %>% 
+  mutate(across(1:3, as.factor))
+```
+
+# Wrangling
+## trait data (full)
+```{r LDMC caclulation}
+trait_data <- trait_data_raw %>% 
+  mutate(LDMC = dweight / fweight) %>% 
+  select(code:leafa, LDMC); head(trait_data, 10)
+```
+
+```{r SLA caclulation}
+trait_data <- trait_data_raw %>% 
+  mutate(SLA = leafa / dweight) %>% 
+  full_join(trait_data) %>% 
+  select(code:dweight, leafa, LDMC, SLA); head(trait_data, 10)
+```
+
+```{r}
+trait_data <- trait_data %>% 
+  mutate(across(1:10, as.factor)) # convert catergorical variables to factor
+```
+
+```{r}
+# convert trait dataset to long format
+trait_data_long <- trait_data %>% 
+  pivot_longer(!code:group, names_to = "trait", values_to = "trait_value") 
+```
+
+## trait data (pooled) 
+```{r}
+trait_data_pooled <- trait_data %>%  # pool data by plot and species
+  group_by(plot, spec) %>% 
+  summarise(height = mean(height),
+            dweight = mean(dweight), 
+            fweight = mean(fweight),
+            leafa = mean(leafa), 
+            LDMC = mean(LDMC), 
+            SLA = mean(SLA))
+
+trait_data_pooled <- trait_data %>% # add taxonomic variables to pooled dataset
+  select(2:10) %>% 
+  right_join(trait_data_pooled, by = c("plot", "spec")) %>% 
+  distinct()
+```
+
+### add leaf chem comp
+```{r}
+trait_data_pooled <- trait_data_pooled %>% 
+  left_join(leaf_chem, by = c("plot", "spec")) %>% # combined data has 3 extra rows??? 
+  select(ID, everything())
+```
+
+```{r}
+# convert trait dataset to long format
+trait_data_pooled_long <- trait_data_pooled %>% 
+  pivot_longer(!ID:group, names_to = "trait", values_to = "trait_value") %>% 
+  filter(!is.na(ID))
+```
+
+# PCA 
+```{r}
+trait_data_pooled %>% 
+  #select(species, height:CN_ratio) %>% 
+  na.omit() %>% 
+  ggpairs(columns = 11:21, 
+          mapping = aes(color = habitat))
+
+ggsave("../3_output/Figures/variables.svg")
+```
+
+## species traits
+```{r}
+species_traits <- trait_data_pooled %>% 
+  filter(complete.cases(.)) %>% 
+  group_by(species) %>% 
+  summarise(plant_height = mean(height), 
+            LDMC = mean(LDMC), 
+            SLA = mean(SLA), 
+            N = mean(wN), 
+            d15N = mean(d15N), 
+            C = mean(wC), 
+            d13C = mean(d13C), 
+            CN_ratio = mean(CN_ratio)) %>% 
+  column_to_rownames(var = "species")
+
+
+```
+
+```{r}
+species_pca <- species_traits %>% 
+  scale() %>% 
+  rda()
+
+summary(species_pca)
+
+species_scores <- as.data.frame(species_pca$CA$u[, 1:2])
+species_scores$species <- as.factor(rownames(species_scores))
+trait_scores <- as.data.frame(species_pca$CA$v[, 1:2])
+trait_scores$trait <- as.factor(rownames(trait_scores))
+
+species_scores <- species_scores %>% 
+  left_join(species_list)
+
+```
+
+```{r}
+ggplot() +
+  geom_hline(yintercept = 0, linetype = "dotted", alpha = 0.8) + 
+  geom_vline(xintercept = 0, linetype = "dotted", alpha = 0.8) +
+  geom_segment(data = trait_scores, aes(x = 0, y = 0, xend = 0.9 * PC1, yend = 0.9 * PC2), arrow = arrow(type = "closed", length = unit(0.1, "inches")), color = "gray") +
+  geom_point(data = species_scores, aes(x = PC1, y = PC2, color = group), size = 3, alpha = 0.70) + # add the point markers
+  geom_text_repel(data = species_scores, aes(x = PC1, y = PC2, label = species, color = group), size = 4,  alpha = 0.7) +  # add the species labels
+  geom_label(data = trait_scores, aes(PC1, PC2, label = trait), col = "navy", label.size = NA, fill = NA) +
+  #geom_text(data = data_scores, aes(x = NMDS1, y = NMDS2, label = plot), vjust=0) +  # add the site labels
+  #coord_equal() +
+  theme_classic() +
+  #guides(color = guide_legend(override.aes = list(shape = NA))) +
+  theme(panel.border = element_rect(color = "black", fill = NA, size = 1), 
+        strip.background = element_rect(color = "black", size = 1)) + 
+  labs(x = "PC1 (50%)", y = "PC2 (17%)", color = "Functional group") 
+  
+
+ggsave("../3_output/Figures/species_pca.svg", height = 5, width = 6)
+```
+
+## trait observations (pooled)
+```{r}
+pca_traits <- trait_data_pooled %>% 
+  filter(complete.cases(.)) %>% 
+  column_to_rownames(var = "ID") %>% 
+  select(10, 14:20) %>% 
+  scale() %>% 
+  rda()
+
+summary(pca_traits)
+
+site_scores <- as.data.frame(pca_traits$CA$u[, 1:2])
+site_scores$ID <- as.factor(rownames(site_scores))
+trait_scores <- as.data.frame(pca_traits$CA$v[, 1:2])
+trait_scores$trait <- as.factor(rownames(trait_scores))
+
+site_scores <- trait_data_pooled %>%
+  select(ID:group) %>% 
+  right_join(site_scores)
+
+site_scores[, 11:12] <- site_scores[, 11:12] * 2.5
+```
+
+```{r}
+ggplot() +
+  geom_hline(yintercept = 0, linetype = "dotted", alpha = 0.8) + 
+  geom_vline(xintercept = 0, linetype = "dotted", alpha = 0.8) +
+  geom_segment(data = trait_scores, aes(x = 0, y = 0, xend = 0.9 * PC1, yend = 0.9 * PC2), arrow = arrow(type = "closed", length = unit(0.1, "inches")), color = "gray") +
+  geom_point(data = site_scores, aes(x = PC1, y = PC2, color = group), size = 3, alpha = 0.70) + # add the point markers
+  geom_label(data = trait_scores, aes(PC1, PC2, label = trait), col = "navy", label.size = NA, fill = NA) +
+  #geom_text(data = data_scores, aes(x = NMDS1, y = NMDS2, label = plot), vjust=0) +  # add the site labels
+  #coord_equal() +
+  theme_classic() +
+  #guides(color = guide_legend(override.aes = list(shape = NA))) +
+  theme(panel.border = element_rect(color = "black", fill = NA, size = 1), 
+        strip.background = element_rect(color = "black", size = 1)) + 
+  labs(x = "PC1 (49%)", y = "PC2 (15%)") 
+```
+
+## trait observations (umpooled)
+```{r}
+pca_traits <- trait_data %>% 
+  filter(complete.cases(.)) %>% 
+  column_to_rownames(var = "code") %>% 
+  select(10, 14:15) %>% 
+  scale() %>% 
+  rda()
+
+summary(pca_traits)
+
+site_scores <- as.data.frame(pca_traits$CA$u[, 1:2])
+site_scores$ID <- as.factor(rownames(site_scores))
+trait_scores <- as.data.frame(pca_traits$CA$v[, 1:2])
+trait_scores$trait <- as.factor(rownames(trait_scores))
+
+site_scores <- trait_data %>%
+  select(code:group) %>% 
+  rename(ID = code) %>% 
+  right_join(site_scores)
+
+site_scores[, 11:12] <- site_scores[, 11:12] * 2.5
+```
+
+```{r}
+ggplot() +
+  geom_hline(yintercept = 0, linetype = "dotted", alpha = 0.8) + 
+  geom_vline(xintercept = 0, linetype = "dotted", alpha = 0.8) +
+  geom_segment(data = trait_scores, aes(x = 0, y = 0, xend = 0.9 * PC1, yend = 0.9 * PC2), arrow = arrow(type = "closed", length = unit(0.1, "inches")), color = "gray") +
+  geom_point(data = site_scores, aes(x = PC1, y = PC2, color = group), size = 3, alpha = 0.70) + # add the point markers
+  geom_label(data = trait_scores, aes(PC1, PC2, label = trait), col = "navy", label.size = NA, fill = NA) +
+  #geom_text(data = data_scores, aes(x = NMDS1, y = NMDS2, label = plot), vjust=0) +  # add the site labels
+  #coord_equal() +
+  theme_classic() +
+  #guides(color = guide_legend(override.aes = list(shape = NA))) +
+  theme(panel.border = element_rect(color = "black", fill = NA, size = 1), 
+        strip.background = element_rect(color = "black", size = 1)) + 
+  labs(x = "PC1 (49%)", y = "PC2 (15%)") 
+```
