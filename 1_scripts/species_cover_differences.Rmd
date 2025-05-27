@@ -14,7 +14,32 @@ are there certain traits associated with increased performance under snow?
   - plot cover difference agains trait value for the species
   - group by functional group and habitat
   
+# Setup
 ```{r}
+script_dir <- dirname(rstudioapi::getActiveDocumentContext()$path)
+setwd(file.path(script_dir, "..", ".."))
 
+# data handling
+require(tidyverse)
+
+# visualization
+require(ggplot2)
+```
+
+# Data import
+```{r data import}
+# trait data
+trait_data <- read_csv("2_data/2_clean_data/trait_data_w.csv")
+
+trait_data_long <- read_csv("2_data/2_clean_data/trait_data_l.csv")
+
+trait_data_pooled <- read_csv("2_data/2_clean_data/pooled_trait_data_w.csv")
+
+trait_data_pooled_long <- read_csv("2_data/2_clean_data/pooled_trait_data_l.csv")
+```
+
+```{r}
+# community composition data (long)
+community_data <- read_csv("2_data/2_clean_data/community_data_2023_l.csv") 
 ```
 

@@ -11,6 +11,9 @@ knitr::opts_chunk$set(echo = TRUE)
 
 # Setup
 ```{r}
+script_dir <- dirname(rstudioapi::getActiveDocumentContext()$path)
+setwd(file.path(script_dir, "..", ".."))
+
 # data handling
 require(tidyverse)
 
@@ -49,7 +52,7 @@ trait_data_pooled %>%
   ggpairs(columns = 11:21, 
           mapping = aes(color = habitat))
 
-ggsave("../3_output/Figures/variables.svg")
+ggsave("3_output/Figures/variables.svg")
 ```
 
 ## species traits
@@ -104,7 +107,7 @@ ggplot() +
   labs(x = "PC1 (50%)", y = "PC2 (17%)", color = "Functional group") 
   
 
-ggsave("../3_output/Figures/species_pca.svg", height = 5, width = 6)
+ggsave("3_output/Figures/species_pca.svg", height = 5, width = 6)
 ```
 
 ## trait observations (pooled)

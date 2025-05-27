@@ -11,6 +11,9 @@ knitr::opts_chunk$set(echo = TRUE)
 
 # Setup
 ```{r}
+script_dir <- dirname(rstudioapi::getActiveDocumentContext()$path)
+setwd(file.path(script_dir, "..", ".."))
+
 # data handling
 require(tidyverse)
 
@@ -100,7 +103,7 @@ boot_traits %>%
         strip.background = element_rect(color = "black", size = 1),
         axis.text.x = element_text(angle = 25, hjust = 1))
 
-ggsave("../3_output/Figures/bootstrapped_traits.svg", height = 7, width = 7)
+ggsave("3_output/Figures/bootstrapped_traits.svg", height = 7, width = 7)
 ```
 
 ## with chem
@@ -117,5 +120,5 @@ boot_traits_pooled %>%
         strip.background = element_rect(color = "black", size = 1),
         axis.text.x = element_text(angle = 25, hjust = 1))
 
-ggsave("../3_output/Figures/bootstrapped_traits_pooled.svg", height = 7, width = 7)
+ggsave("3_output/Figures/bootstrapped_traits_pooled.svg", height = 7, width = 7)
 ```
