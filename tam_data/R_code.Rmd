@@ -7,7 +7,7 @@ output: html_document
 
 ```{r packages, message=FALSE, warning=FALSE, include=FALSE}
 # Set working directory to where files are saved
-setwd("~/PhD/Indoor experiments/R_project/data_for_publishing")
+#setwd("~/PhD/Indoor experiments/R_project/data_for_publishing")
 
 library(ggplot2)
 library(dplyr)
