@@ -1,0 +1,20 @@
+---
+title: "species_cover_differences"
+author: "Liyenne"
+date: "2025-05-27"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+are there certain traits associated with increased performance under snow? 
+  - calculate cover difference of species in plots
+  - plot cover difference agains trait value for the species
+  - group by functional group and habitat
+  
+```{r}
+
+```
+
