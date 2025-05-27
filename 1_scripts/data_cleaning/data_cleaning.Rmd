@@ -129,4 +129,9 @@ trait_data_pooled_long %>%
 write_csv("2_data/2_clean_data/pooled_trait_data_l.csv")
 ```
 
+# upload to osf
+```{r}
+
+```
+
 
