@@ -19,12 +19,16 @@ require(tidyverse)
 
 # analysis
 require(vegan)
+require(gllvm)
 
 # visualization
 require(ggplot2)
 require(ggrepel)
 require(ggordiplots)
 require(ggvegan)
+
+require(corrplot)
+require(gclus)
 ```
 
 # Data import
@@ -34,7 +38,8 @@ trait_data <- read_csv("2_data/2_clean_data/trait_data_w.csv")
 
 trait_data_long <- read_csv("2_data/2_clean_data/trait_data_l.csv")
 
-trait_data_pooled <- read_csv("2_data/2_clean_data/pooled_trait_data_w.csv")
+trait_data_pooled <- read_csv("2_data/2_clean_data/pooled_trait_data_w.csv") %>% 
+  mutate(across(1:10, as.factor))
 
 trait_data_pooled_long <- read_csv("2_data/2_clean_data/pooled_trait_data_l.csv")
 ```
@@ -69,8 +74,6 @@ species_traits <- trait_data_pooled %>%
             d13C = mean(d13C), 
             CN_ratio = mean(CN_ratio)) %>% 
   column_to_rownames(var = "species")
-
-
 ```
 
 ```{r}
@@ -104,10 +107,10 @@ ggplot() +
   #guides(color = guide_legend(override.aes = list(shape = NA))) +
   theme(panel.border = element_rect(color = "black", fill = NA, size = 1), 
         strip.background = element_rect(color = "black", size = 1)) + 
-  labs(x = "PC1 (50%)", y = "PC2 (17%)", color = "Functional group") 
+  labs(x = "PC1 (41%)", y = "PC2 (20%)", color = "Functional group") 
   
 
-ggsave("3_output/Figures/species_pca.svg", height = 5, width = 6)
+ggsave("3_output/Figures/species_pca1.svg", height = 5, width = 6)
 ```
 
 ## trait observations (pooled)
@@ -125,6 +128,7 @@ site_scores <- as.data.frame(pca_traits$CA$u[, 1:2])
 site_scores$ID <- as.factor(rownames(site_scores))
 trait_scores <- as.data.frame(pca_traits$CA$v[, 1:2])
 trait_scores$trait <- as.factor(rownames(trait_scores))
+
 
 site_scores <- trait_data_pooled %>%
   select(ID:group) %>% 
@@ -146,7 +150,7 @@ ggplot() +
   #guides(color = guide_legend(override.aes = list(shape = NA))) +
   theme(panel.border = element_rect(color = "black", fill = NA, size = 1), 
         strip.background = element_rect(color = "black", size = 1)) + 
-  labs(x = "PC1 (49%)", y = "PC2 (15%)") 
+  labs(x = "PC1 (41%)", y = "PC2 (17%)") 
 ```
 
 ## trait observations (umpooled)
@@ -188,3 +192,24 @@ ggplot() +
         strip.background = element_rect(color = "black", size = 1)) + 
   labs(x = "PC1 (49%)", y = "PC2 (15%)") 
 ```
+
+# GLLVM
+```{r}
+y <- community_data %>% 
+  pivot_wider(id_cols = plot, names_from = species, values_from = hits) %>% 
+  column_to_rownames("plot") %>% 
+  as.matrix()
+```
+
+## species co-occurrence
+```{r}
+fit1lv <- gllvm(y, family = "negative.binomial", num.lv = 1, seed = 1234)
+
+png("3_output/Figures/corplot_test.png", width = 1800, height = 1800, res = 300)
+cr0 <- getResidualCor(fit1lv)
+corrplot(cr0[order.single(cr0), order.single(cr0)], diag = FALSE, type = "lower", 
+         method = "square", tl.cex = 0.5, tl.srt = 45, tl.col = "red")
+dev.off()
+
+```
+

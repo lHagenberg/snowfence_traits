@@ -41,5 +41,105 @@ trait_data_pooled_long <- read_csv("2_data/2_clean_data/pooled_trait_data_l.csv"
 ```{r}
 # community composition data (long)
 community_data <- read_csv("2_data/2_clean_data/community_data_2023_l.csv") 
+
+species_list <- read_csv("2_data/1_raw_data/community_composition/sf_vp_species_list.csv")
 ```
 
+get cover difference between control and snowfence for each species
+```{r}
+cover_diff <- community_data %>% 
+  group_by(habitat, site, species) %>% 
+  summarise(
+    sf_cover = cover[treatment == "snowfence"],
+    ctrl_cover = cover[treatment == "control"],
+    difference = cover[treatment == "snowfence"] - cover[treatment == "control"],
+    .groups = "drop"
+  ) 
+
+cover_diff <- species_list %>% 
+  select(species, group) %>% 
+  right_join(cover_diff, by = "species") %>% 
+  select(habitat, site, species, group, everything())
+```
+
+# Winners & Losers
+inspired by Garcia Criado (2023)
+```{r}
+cover_diff %>% 
+  filter(difference != 0) %>%
+ggplot(aes(x = reorder(species, difference, FUN = median, decreasing = TRUE), y = difference, color = group)) +
+  stat_summary(fun = median, 
+               fun.min = function(x) quantile(x, 0.25), 
+               fun.max = function(x) quantile(x, 0.75),
+               geom = "pointrange", 
+               size = 0.5, 
+               fatten = 2) +
+  geom_hline(yintercept = 0, linetype = "solid", color = "black") +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(x = "Species", y = "Species cover difference (%)")
+
+ggsave("3_output/Figures/cover_differences.svg", height = 5, width = 8)
+```
+
+
+# plotting mean cover difference against traits
+## based on means
+```{r}
+species_traits <- trait_data_pooled %>% 
+  filter(complete.cases(.)) %>% 
+  group_by(species) %>% 
+  summarise(plant_height = mean(height), 
+            LDMC = mean(LDMC), 
+            SLA = mean(SLA), 
+            N = mean(wN), 
+            d15N = mean(d15N), 
+            C = mean(wC), 
+            d13C = mean(d13C), 
+            CN_ratio = mean(CN_ratio)) 
+```
+
+```{r}
+species_traits <- cover_diff %>% 
+  filter(difference != 0) %>%
+  group_by(species) %>% 
+  summarise(mean_diff = mean(difference)) %>% 
+  right_join(species_traits, by = "species")
+
+species_traits <- species_list %>% 
+  select(species, group) %>% 
+  right_join(species_traits, by = "species")
+```
+
+```{r}
+species_traits %>% 
+  ggplot(aes(x = SLA, y = mean_diff, color = group)) +
+  geom_point()
+```
+
+## based on all data
+```{r}
+species_traits <- trait_data_pooled %>% 
+  filter(complete.cases(.)) %>% 
+  group_by(species) %>% 
+  summarise(plant_height = mean(height), 
+            LDMC = mean(LDMC), 
+            SLA = mean(SLA), 
+            N = mean(wN), 
+            d15N = mean(d15N), 
+            C = mean(wC), 
+            d13C = mean(d13C), 
+            CN_ratio = mean(CN_ratio)) 
+```
+
+```{r}
+species_traits <- cover_diff %>% 
+  filter(difference != 0) %>%
+  right_join(species_traits, by = "species")
+```
+
+```{r}
+species_traits %>% 
+  ggplot(aes(x = CN_ratio, y = difference, color = group)) +
+  geom_point()
+```

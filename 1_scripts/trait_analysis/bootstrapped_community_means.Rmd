@@ -1,0 +1,277 @@
+---
+title: "bootstrapped_community_means"
+author: "Liyenne"
+date: "2025-05-23"
+output: html_document
+knit: (function(input, ...) {
+    rmarkdown::render(
+      input,
+      output_dir = here::here("outputs")
+    )
+  })
+cache: no
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Setup
+```{r}
+script_dir <- dirname(rstudioapi::getActiveDocumentContext()$path)
+setwd(file.path(script_dir, "..", ".."))
+
+# data handling
+require(tidyverse)
+
+# analysis
+require(traitstrap)
+
+# visualization
+require(ggplot2)
+```
+
+# Data import
+```{r data import}
+# trait data
+traits <- read_csv("2_data/2_clean_data/trait_data_w.csv") %>%
+  mutate(across(code:group, as.factor))
+
+traits_l <- read_csv("2_data/2_clean_data/trait_data_l.csv")%>%
+  mutate(across(code:group, as.factor))
+
+traits_pooled <- read_csv("2_data/2_clean_data/pooled_trait_data_w.csv") %>%
+  mutate(across(ID:group, as.factor))
+
+
+traits_pooled_l <- read_csv("2_data/2_clean_data/pooled_trait_data_l.csv") %>%
+  mutate(across(ID:group, as.factor))
+```
+
+```{r}
+# taxonomic information
+species_list <- read_csv("../../1_data/community_data/2025/pinpoint_data/sf_vp_species_list.csv") %>% 
+  mutate(across(1:5, as.factor))
+```
+
+```{r}
+# biomass model outputs
+biomass_models <- 
+  read_csv("3_output/Results/biomass_pinpoint_models.csv") %>% 
+  filter(spec != "Rholap")
+```
+
+```{r}
+# community composition data (l)
+community_data <- read_csv("../snowfence_community/2_data/2_clean_data/vp_pp_leaf_2025_l_fn.csv") %>% 
+  mutate(habitat = as.factor(ifelse( # create habitat variable based on plot code
+    grepl('D', plot), 'fen', ifelse(
+      grepl('E', plot), 'heath', 'ridge'))
+    )) %>% 
+  mutate(treatment = as.factor(ifelse( # create treatment variable based on plot code
+    grepl('C', plot), 'control', 'snowfence'
+    ))) %>%  
+  mutate(site = as.factor(substr(plot, 2,2))) %>% # create site variable from plot code
+  left_join(species_list, by = "species") %>% 
+  select(plot, habitat, site, treatment, spec, species, family:group, hits)
+```
+
+```{r}
+# calculate biomass for community
+community_biomass <- community_data %>% 
+  left_join(biomass_models, by = "spec") %>% 
+  select(plot:estimate, sig) %>% 
+  mutate(biomass = hits * estimate) %>% 
+  drop_na(biomass)#%>% 
+  #select(!estimate:sig)
+```
+
+
+
+
+# community weighted averages
+are shifts in community averages driven by species adaptation or species composition differences?
+## no chem
+```{r}
+filled_traits <- trait_fill(
+comm = community_data, traits = traits_l,
+scale_hierarchy = c("habitat", "site", "treatment", "plot"),
+taxon_col = c("species", "genus", "family"), value_col = "trait_value",
+trait_col = "trait", abundance_col = "hits", complete_only = TRUE, leaf_id = "code"
+)
+autoplot(filled_traits)
+
+trait_missing(filled_trait = filled_traits, comm = community_data)
+
+trait_fit_distributions(filled_traits, distribution_type = "normal")
+
+boot_traits <- trait_np_bootstrap(filled_traits = filled_traits, nrep = 10, sample_size = 100)
+```
+
+```{r}
+boot_traits %>% 
+  ggplot(aes(x = habitat, y = mean, fill = treatment)) + 
+  geom_boxplot() + 
+  facet_wrap(~ trait, scales = "free") + 
+  theme_classic() +
+  theme(panel.spacing = unit(.0, "lines"),
+        panel.border = element_rect(color = "black", fill = NA, size = 1),
+        legend.position = "bottom",
+        legend.margin = margin(t = -8),
+        strip.background = element_rect(color = "black", size = 1),
+        axis.text.x = element_text(angle = 25, hjust = 1))
+
+ggsave("3_output/Figures/bootstrapped_traits.svg", height = 7, width = 7)
+```
+
+## with chem
+### full community
+```{r}
+filled_traits_pooled <- trait_fill(
+comm = community_data, traits = traits_pooled_l,
+scale_hierarchy = c("habitat", "site", "treatment", "plot"),
+taxon_col = c("species", "genus", "family"), value_col = "trait_value",
+trait_col = "trait", abundance_col = "hits", complete_only = TRUE, leaf_id = "ID"
+)
+autoplot(filled_traits_pooled)
+
+trait_missing(filled_trait = filled_traits_pooled, comm = community_data)
+
+boot_traits_pooled <- trait_np_bootstrap(filled_traits = filled_traits_pooled, nrep = 10, sample_size = 100)
+
+trait_summarise_boot_moments(boot_traits_pooled)
+```
+
+```{r}
+facet_order <- c("height", "SLA", "LDMC", "CN_ratio", "wC", "wN", "d13C", "d15N")
+trait_labs <- c("plant height", "SLA", "LDMC", "C:N ratio", "% C", "% N", as.character(bquote(δ^13*C)), as.character(bquote(δ^15*N)))
+names(trait_labs) <- c("height", "SLA", "LDMC", "wC", "wN", "CN_ratio", "d13C", "d15N")
+boot_traits_pooled_bm <- boot_traits_pooled_bm %>% mutate(habitat = recode(habitat, "meadow" = "fen"))
+
+
+boot_traits_pooled %>% 
+  filter(trait %in% c("SLA", "LDMC", "height", "wC", "wN", "CN_ratio", "d13C", "d15N")) %>%
+  mutate(trait = factor(trait, levels = facet_order)) %>%
+  mutate(habitat = factor(habitat, levels = c("fen", "heath", "ridge"))) %>%
+  ggplot(aes(x = habitat, y = mean, fill = treatment)) + 
+  geom_boxplot() + 
+  scale_fill_manual(values = c("#999999", "#4da6ff")) +
+  facet_wrap(~ trait, scales = "free", ncol = 4, nrow = 2) + 
+  theme_classic() +
+  theme(panel.spacing = unit(.0, "lines"),
+        panel.border = element_rect(color = "black", fill = NA, size = 1),
+        legend.position = "bottom",
+        legend.margin = margin(t = -8),
+        strip.background = element_rect(color = "black", size = 1),
+        axis.text.x = element_text(angle = 25, hjust = 1))
+
+ggsave("3_output/Figures/bootstrapped_traits_pooled_2025.svg", height = 4, width = 5)
+```
+
+### spec with biomass
+```{r}
+# get a vector of species with significant biomass pinpoint relationships
+sig_spec <- biomass_models %>% 
+  #filter(sig != is.na(spec)) %>% # filter species with enough values to model
+  #filter(sig == "*") %>% # filter species with significant models
+  distinct(spec) %>% 
+  pull(spec)
+
+traits_pooled_l_bm <- traits_pooled_l %>% 
+  filter(spec %in% sig_spec)
+```
+
+```{r}
+filled_traits_pooled_bm <- trait_fill(
+comm = community_data, traits = traits_pooled_l_bm,
+scale_hierarchy = c("habitat", "site", "treatment", "plot"),
+taxon_col = c("species", "genus", "family"), value_col = "trait_value",
+trait_col = "trait", abundance_col = "hits", complete_only = TRUE, leaf_id = "ID"
+)
+autoplot(filled_traits_pooled_bm)
+
+trait_missing(filled_trait = filled_traits_pooled_bm, comm = community_data)
+
+boot_traits_pooled_bm <- trait_np_bootstrap(filled_traits = filled_traits_pooled_bm, nrep = 10, sample_size = 100)
+
+trait_summarise_boot_moments(boot_traits_pooled_bm)
+```
+
+```{r}
+facet_order <- c("height", "SLA", "LDMC", "CN_ratio", "wC", "wN", "d13C", "d15N")
+trait_labs <- c("plant height", "SLA", "LDMC", "C:N ratio", "% C", "% N", as.character(bquote(δ^13*C)), as.character(bquote(δ^15*N)))
+names(trait_labs) <- c("height", "SLA", "LDMC", "wC", "wN", "CN_ratio", "d13C", "d15N")
+boot_traits_pooled_bm <- boot_traits_pooled_bm %>% mutate(habitat = recode(habitat, "meadow" = "fen"))
+
+boot_traits_pooled_bm %>% 
+  filter(trait %in% c("SLA", "LDMC", "height", "wC", "wN", "CN_ratio", "d13C", "d15N")) %>%
+  mutate(trait = factor(trait, levels = facet_order)) %>%
+  mutate(habitat = factor(habitat, levels = c("fen", "heath", "ridge"))) %>%
+  ggplot(aes(x = habitat, y = mean, fill = treatment)) + 
+  geom_boxplot() + 
+  scale_fill_manual(values = c("#999999", "#4da6ff")) +
+  facet_wrap(~ trait, scales = "free", ncol = 4, nrow = 2) + 
+  theme_classic() +
+  theme(panel.spacing = unit(.0, "lines"),
+        panel.border = element_rect(color = "black", fill = NA, size = 1),
+        legend.position = "bottom",
+        legend.margin = margin(t = -8),
+        strip.background = element_rect(color = "black", size = 1),
+        axis.text.x = element_text(angle = 25, hjust = 1))
+
+ggsave("3_output/Figures/bootstrapped_traits_pooled_bm_2025.svg", height = 4, width = 5)
+```
+
+### biomass weighted
+```{r}
+# get a vector of species with significant biomass pinpoint relationships
+sig_spec <- biomass_models %>% 
+  #filter(sig != is.na(spec)) %>% # filter species with enough values to model
+  #filter(sig == "*") %>% # filter species with significant models
+  distinct(spec) %>% 
+  pull(spec)
+
+traits_pooled_l_bm <- traits_pooled_l %>% 
+  filter(spec %in% sig_spec)
+```
+
+```{r}
+filled_traits_pooled_bm <- trait_fill(
+comm = community_biomass, traits = traits_pooled_l,
+scale_hierarchy = c("habitat", "site", "treatment", "plot"),
+taxon_col = c("species", "genus", "family"), value_col = "trait_value",
+trait_col = "trait", abundance_col = "biomass", complete_only = TRUE, leaf_id = "ID"
+)
+autoplot(filled_traits_pooled_bm)
+
+trait_missing(filled_trait = filled_traits_pooled_bm, comm = community_biomass)
+
+boot_traits_pooled_bm <- trait_np_bootstrap(filled_traits = filled_traits_pooled_bm, nrep = 10, sample_size = 100)
+
+trait_summarise_boot_moments(boot_traits_pooled_bm)
+```
+
+```{r}
+facet_order <- c("height", "SLA", "LDMC", "CN_ratio", "wC", "wN", "d13C", "d15N")
+trait_labs <- c("plant height", "SLA", "LDMC", "C:N ratio", "% C", "% N", as.character(bquote(δ^13*C)), as.character(bquote(δ^15*N)))
+names(trait_labs) <- c("height", "SLA", "LDMC", "wC", "wN", "CN_ratio", "d13C", "d15N")
+boot_traits_pooled_bm <- boot_traits_pooled_bm %>% mutate(habitat = recode(habitat, "meadow" = "fen"))
+
+boot_traits_pooled_bm %>% 
+  filter(trait %in% c("SLA", "LDMC", "height", "wC", "wN", "CN_ratio", "d13C", "d15N")) %>%
+  mutate(trait = factor(trait, levels = facet_order)) %>%
+  mutate(habitat = factor(habitat, levels = c("fen", "heath", "ridge"))) %>%
+  ggplot(aes(x = habitat, y = mean, fill = treatment)) + 
+  geom_boxplot() + 
+  scale_fill_manual(values = c("#999999", "#4da6ff")) +
+  facet_wrap(~ trait, scales = "free", ncol = 4, nrow = 2) + 
+  theme_classic() +
+  theme(panel.spacing = unit(.0, "lines"),
+        panel.border = element_rect(color = "black", fill = NA, size = 1),
+        legend.position = "bottom",
+        legend.margin = margin(t = -8),
+        strip.background = element_rect(color = "black", size = 1),
+        axis.text.x = element_text(angle = 25, hjust = 1))
+
+ggsave("3_output/Figures/bootstrapped_traits_pooled_bmWeighted_2025.svg", height = 4, width = 5)
+```

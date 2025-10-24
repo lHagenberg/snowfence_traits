@@ -12,9 +12,10 @@ knitr::opts_chunk$set(echo = TRUE)
 # setup
 ```{r}
 script_dir <- dirname(rstudioapi::getActiveDocumentContext()$path)
-setwd(file.path(script_dir, "..", ".."))
+setwd(file.path(script_dir, "..", "..")); rm(script_dir)
 
 require(tidyverse)
+require(WorldFlora)
 ```
 
 # Data import
@@ -37,8 +38,8 @@ trait_data_raw <- read_csv("2_data/1_raw_data/snowfence_traits/sf_plant_trait_da
 ```
 
 ```{r}
-# community composition data (long)
-community_data <- read_csv("2_data/1_raw_data/community_composition/vp_pp_2023_l_fn.csv") %>% 
+# community composition data 2023 (long)
+community_2023 <- read_csv("2_data/1_raw_data/community_composition/vp_pp_2023_l_fn.csv") %>% 
   mutate(habitat = as.factor(ifelse( # create habitat variable based on plot code
     grepl('D', plot), 'meadow', ifelse(
       grepl('E', plot), 'heath', 'ridge'))
@@ -51,16 +52,26 @@ community_data <- read_csv("2_data/1_raw_data/community_composition/vp_pp_2023_l
   left_join(species_list, by = "species") %>% 
   select(plot, habitat, site, treatment, spec, species, genus:group, hits, cover)
 
-community_data %>% 
+community_2023 %>% 
 write_csv("2_data/2_clean_data/community_data_2023_l.csv")
 ```
 
+
+
 ```{r}
 leaf_chem <- read_csv("2_data/1_raw_data/snowfence_traits/sf_leaf_chem.csv") %>% 
-  mutate(across(1:3, as.factor))
+  mutate(across(1:3, as.factor)) %>% 
+  mutate(across(4:8, as.numeric))
 ```
 
 # Wrangling
+## taxonomic data 
+```{r}
+checked_species_list <- species_list %>% 
+  rename(spec.name = species) %>% 
+  WFO.match.fuzzyjoin(WFO.file = "../../1_data/TRY_data/classification.csv")
+```
+
 ## trait data (full)
 ```{r LDMC caclulation}
 trait_data <- trait_data_raw %>% 
@@ -128,6 +139,15 @@ trait_data_pooled_long <- trait_data_pooled %>%
 trait_data_pooled_long %>% 
 write_csv("2_data/2_clean_data/pooled_trait_data_l.csv")
 ```
+
+# Outlier checks
+```{r}
+trait_data %>% 
+  ggplot(aes(x = species, y = SLA)) + 
+  geom_point() + 
+  theme(axis.text.x = element_text(angle = 25, hjust = 1))
+```
+
 
 # upload to osf
 ```{r}

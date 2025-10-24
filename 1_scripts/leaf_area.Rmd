@@ -74,12 +74,16 @@ dd4 <- dd4$summary
 dd5 <- run.ij(set.directory = "C:/Users/liha3090/leaf_scans/analysis_ready/round5", distance.pixel = 237, known.distance = 2, log = TRUE, low.size = 0.005, trim.pixel = 50, trim.pixel.right = 50, trim.pixel.top = 1250, save.image = TRUE)
 dd5 <- dd5$summary
 
-# run leaf scans round4
+# run leaf scans round6
 dd6 <- run.ij(set.directory = "C:/Users/liha3090/leaf_scans/analysis_ready/round6", distance.pixel = 237, known.distance = 2, log = TRUE, low.size = 0.005, trim.pixel = 50, trim.pixel.right = 50, trim.pixel.top = 1250, save.image = TRUE)
 dd6 <- dd6$summary
 
+# run leaf scans check
+dd6 <- run.ij(set.directory = "C:/Users/liha3090/leaf_scans/scan_check", distance.pixel = 237, known.distance = 2, log = TRUE, low.size = 0.005, trim.pixel = 100, trim.pixel.right = 100, trim.pixel.top = 1450, save.image = TRUE)
+dd6 <- dd6$summary
+
 LA2024 <- rbind(dd1, dd2, dd3, dd4, dd5, dd6)
-write.csv(LA2024, "../../3_output/1_data_products/leaf_area_2024.csv")
+#write.csv(LA2024, "../../3_output/1_data_products/leaf_area_2024.csv")
 ```
 
 ```{r}

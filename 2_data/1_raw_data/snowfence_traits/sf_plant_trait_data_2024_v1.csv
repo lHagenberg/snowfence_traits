@@ -1,4 +1,4 @@
-﻿code,Plot,habitat,site,treatment,species,height,fweight,dweight,bulknr,leafa,comment
+﻿code,plot,habitat,site,treatment,spec,height,fweight,dweight,bulknr,leafa,comment
 1,X4C,X,4,C,Dryoct,2.7,0.059,0.0211,5,2.547,
 2,X4C,X,4,C,Loipro,0.5,0.0401,0.0191,10,1.061,
 3,X4C,X,4,C,Loipro,0.9,0.0581,0.0306,10,,scan missing

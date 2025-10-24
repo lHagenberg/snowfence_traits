@@ -1,0 +1,82 @@
+---
+title: "species_adaptation"
+author: "Liyenne"
+date: "2025-10-22"
+output: html_document
+knit: (function(input, ...) {
+    rmarkdown::render(
+      input,
+      output_dir = here::here("outputs")
+    )
+  })
+cache: no
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Setup
+```{r}
+script_dir <- dirname(rstudioapi::getActiveDocumentContext()$path)
+setwd(file.path(script_dir, "..", ".."))
+
+# data handling
+require(tidyverse)
+
+# analysis
+require(traitstrap)
+
+# visualization
+require(ggplot2)
+```
+
+# Data import
+```{r data import}
+# trait data
+traits <- read_csv("2_data/2_clean_data/trait_data_w.csv") %>%
+  mutate(across(code:group, as.factor))
+
+traits_l <- read_csv("2_data/2_clean_data/trait_data_l.csv")%>%
+  mutate(across(code:group, as.factor))
+
+traits_pooled <- read_csv("2_data/2_clean_data/pooled_trait_data_w.csv") %>%
+  mutate(across(ID:group, as.factor))
+
+
+traits_pooled_l <- read_csv("2_data/2_clean_data/pooled_trait_data_l.csv") %>%
+  mutate(across(ID:group, as.factor))
+```
+
+```{r}
+# taxonomic information
+species_list <- read_csv("2_data/1_raw_data/community_composition/sf_vp_species_list.csv") %>% 
+  mutate(across(1:5, as.factor))
+```
+
+```{r}
+# community composition data (l)
+community_data <- read_csv("2_data/1_raw_data/community_composition/vp_pp_leaf_2025_l_fn.csv") %>% 
+  mutate(habitat = as.factor(ifelse( # create habitat variable based on plot code
+    grepl('D', plot), 'fen', ifelse(
+      grepl('E', plot), 'heath', 'ridge'))
+    )) %>% 
+  mutate(treatment = as.factor(ifelse( # create treatment variable based on plot code
+    grepl('C', plot), 'control', 'snowfence'
+    ))) %>%  
+  mutate(site = as.factor(substr(plot, 2,2))) %>% # create site variable from plot code
+  left_join(species_list, by = "species") %>% 
+  select(plot, habitat, site, treatment, spec, species, family:group, hits)
+```
+
+```{r}
+# biomass model outputs
+biomass_models <- 
+  read_csv("3_output/Results/biomass_pinpoint_models.csv")
+```
+
+# Analysis
+```{r}
+
+```
+

@@ -1,0 +1,206 @@
+---
+title: "SF_biomass"
+author: "Liyenne"
+date: "2025-10-13"
+output: html_document
+knit: (function(input, ...) {
+    rmarkdown::render(
+      input,
+      output_dir = here::here("outputs")
+    )
+  })
+cache: no
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Setup
+## packages
+```{r}
+require(tidyverse)
+require(broom)
+require(purrr)
+```
+## functions
+```{r}
+extr_3 <- function(string) {
+  # Split the string into words
+  words <- strsplit(string, " ")[[1]]
+  # Extract the first three letters from each word
+  first_three_letters <- sapply(words, substr, 1, 3)
+  # Return the first three letters of each word
+  first_three_letters <- paste(first_three_letters, collapse = "")
+  return(first_three_letters)
+}
+```
+
+# Data import
+```{r}
+biomass <- read.csv("../../1_data/trait_data/biomass/SF_biomass_2025.csv") %>% 
+  mutate(dweight = as.numeric(dweight)) %>% 
+  select(!comment)
+```
+
+```{r}
+emp_biomass <- biomass %>% 
+  filter(species == "Empetrum nigrum") %>%
+  mutate(species_part = paste(species, part, sep = "_")) %>% 
+  select(plot, species_part, species, part, dweight)
+
+emp_biomass_wide <- emp_biomass %>% 
+  select(plot, species_part, dweight) %>% 
+  pivot_wider(names_from = species_part, values_from = dweight)
+
+# calculate empetrum stem and leaf based on unsorted weight
+emp_biomass_final <- emp_biomass_wide %>%
+  mutate(
+    total = `Empetrum nigrum_stem` + `Empetrum nigrum_leaf`,
+    `Empetrum nigrum_stem` = `Empetrum nigrum_stem` + (`Empetrum nigrum_stem` / total) * `Empetrum nigrum_unsorted`,
+    `Empetrum nigrum_leaf` = `Empetrum nigrum_leaf` + (`Empetrum nigrum_leaf` / total) * `Empetrum nigrum_unsorted`
+  ) %>%
+  select(-total) %>% 
+  na.omit %>% 
+  pivot_longer(!plot, names_to = "species_part",  values_to = "dweight") %>%
+  separate(species_part, into = c("species", "part"), sep = "_")
+
+biomass_final <- biomass %>% 
+  rows_update(emp_biomass_final, by = c("plot", "species", "part")) %>% 
+  filter(part != "unsorted")
+
+biomass_final$spec <- NA
+
+for (i in 1:nrow(biomass_final)) {
+  extr <- extr_3(as.data.frame(biomass_final)[i, 2]) 
+  biomass_final[i, 5] <- extr
+  rm(extr)
+}
+
+biomass_final <- biomass_final %>% 
+  select(plot, spec, part, dweight) %>% 
+  filter(part == "leaf")
+```
+
+```{r}
+# import biomass subplot pinpoint data
+biomass_pinpoint <- read.csv("../../1_data/trait_data/biomass/SF_biomass_pinpoint_2025.csv") %>% 
+  slice(1:(n() - 3)) %>% 
+  mutate(across(everything(), ~replace_na(., 0))) %>% 
+  pivot_longer(cols = D1SF:X5C, names_to = "plot", values_to = "hits") %>% 
+  select(plot, species, part, hits)
+
+# get shortened species names
+biomass_pinpoint$spec <- NA
+
+for (i in 1:nrow(biomass_pinpoint)) {
+  extr <- extr_3(as.data.frame(biomass_pinpoint)[i, 2]) 
+  biomass_pinpoint[i, 5] <- extr
+  rm(extr)
+}
+
+biomass_pinpoint <- biomass_pinpoint %>% 
+  select(plot, spec, part, hits) %>% 
+  filter(hits > 0, 
+         part == "leaf")
+```
+
+```{r}
+# merge biomass subplot pinpoint and biomass data
+biomass_pinpoint <- biomass_pinpoint %>% 
+  full_join(biomass_final, by = c("plot", "spec", "part")) %>% 
+  mutate(hits_noNA = replace_na(hits, 1)) 
+
+biomass_pinpoint %>% 
+  head(10)
+```
+
+```{r}
+biomass_pinpoint %>% 
+  filter(spec == "Andpol") %>% 
+  ggplot(aes(x = hits_noNA, y = dweight)) + 
+  geom_point()
+
+species <- unique(biomass_pinpoint$spec)
+plot_list <- list()
+
+for(sp in species) {
+  plot_list[[sp]] <- biomass_pinpoint %>%
+    filter(spec == sp) %>%
+    ggplot(aes(x = hits_noNA, y = dweight)) + 
+    geom_point() +
+    geom_smooth(method = "lm", se = TRUE) +
+    ggtitle(sp)
+}
+
+patchwork::wrap_plots(plot_list, ncol = 5) 
+
+ggsave("3_output/Figures/species_biomass.svg", width = 30, height =  30)
+```
+
+# biomass modelling
+```{r}
+# exclude species with insufficient data
+model_bio_pp <- biomass_pinpoint %>% 
+  group_by(spec) %>% 
+  filter(sum(!is.na(hits)) & sum(!is.na(dweight)) >= 2) 
+
+species <- unique(model_bio_pp$spec)
+model_list <- list()
+
+for(sp in species) {
+  model_list[[sp]] <- lm(dweight ~ hits, 
+                         data = filter(model_bio_pp, spec == sp))
+}
+
+# View a specific model
+summary(model_list[["Andpol"]])
+
+results <- map_dfr(names(model_list), function(sp) {
+  model <- model_list[[sp]]
+  
+  # Get coefficients (estimate, std.error, p.value)
+  coef_data <- tidy(model) %>%
+    filter(term == "hits") %>%  # Get only the slope for hits
+    select(estimate, std.error, p.value)
+  
+  # Get R-squared
+  r2 <- glance(model) %>%
+    select(r.squared)
+  
+  # Combine with species name
+  bind_cols(spec = sp, coef_data, r2)
+})
+
+results <- results %>% 
+  mutate(sig = ifelse(p.value < 0.05, "*", "ns"))
+
+write.csv(results, "3_output/Results/biomass_pinpoint_models.csv", row.names = FALSE)
+```
+
+
+```{r}
+# import full plot pinpoint data
+full_pinpoint <- read.csv("2_data/1_raw_data/biomass/vp_pp_leaf_2025_l.csv") 
+```
+ 
+```{r}
+# get a vector of species with significant biomass pinpoint relationships
+sig_spec <- results %>% 
+  #filter(sig != is.na(spec)) %>% # filter species with enough values to model
+  #filter(sig == "*") %>% # filter species with significant models
+  distinct(spec) %>% 
+  pull(spec)
+
+full_pinpoint %>% 
+  filter(spec %in% sig_spec) %>% 
+  pull(hits) %>% 
+  sum()
+
+
+```
+ # PCA of biomass and traits
+```{r}
+
+```
+
